@@ -182,29 +182,56 @@ pub struct Tab {
 
 thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+    /// события, которые не удалось выполнить прямо сейчас (интерфейс занят или ещё не готов);
+    /// опустошается при каждом завершении with_ui — события не теряются
+    static PENDING: RefCell<std::collections::VecDeque<Box<dyn FnOnce(&mut Ui)>>> = const { RefCell::new(std::collections::VecDeque::new()) };
 }
 
 pub fn install(ui: Ui) {
     UI.with(|u| *u.borrow_mut() = Some(ui));
-}
-
-pub fn with_ui<R>(f: impl FnOnce(&mut Ui) -> R) -> Option<R> {
-    UI.with(|u| u.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
+    // опустошаем всё, что накопилось до готовности интерфейса
+    with_ui(|_| {});
 }
 
 /// Выполнить в UI-потоке (из любого потока).
 pub fn post(f: impl FnOnce(&mut Ui) + Send + 'static) {
-    let _ = slint::invoke_from_event_loop(move || run_or_retry(Box::new(f), 0));
+    let _ = slint::invoke_from_event_loop(move || run_one(Some(Box::new(f))));
 }
 
-/// Если интерфейс сейчас занят (идёт другой обработчик), не теряем событие, а пробуем чуть позже.
-fn run_or_retry(f: Box<dyn FnOnce(&mut Ui)>, tries: u32) {
-    let busy = UI.with(|u| u.try_borrow_mut().is_err());
-    if busy && tries < 50 {
-        slint::Timer::single_shot(std::time::Duration::from_millis(15), move || run_or_retry(f, tries + 1));
-        return;
+/// Если интерфейс сейчас занят (идёт другой обработчик) — откладываем в очередь, не теряя событие.
+fn run_one(mut f: Option<Box<dyn FnOnce(&mut Ui)>>) {
+    UI.with(|u| {
+        let Ok(mut g) = u.try_borrow_mut() else { return };
+        let Some(ui) = g.as_mut() else { return };
+        if let Some(f) = f.take() {
+            f(ui);
+            drain(ui);
+        }
+    });
+    if let Some(f) = f {
+        PENDING.with(|p| p.borrow_mut().push_back(f));
     }
-    with_ui(f);
+}
+
+fn drain(ui: &mut Ui) {
+    loop {
+        let next = PENDING.with(|p| p.borrow_mut().pop_front());
+        match next {
+            Some(f) => f(ui),
+            None => break,
+        }
+    }
+}
+
+/// Выполнить прямо сейчас, только из UI-потока. Возвращает None, если интерфейс занят вложенным вызовом.
+pub fn with_ui<R>(f: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    UI.with(|u| {
+        let mut g = u.try_borrow_mut().ok()?;
+        let ui = g.as_mut()?;
+        let r = f(ui);
+        drain(ui);
+        Some(r)
+    })
 }
 
 // ---------------------------------------------------------------- цвета и мелочи
