@@ -1,6 +1,7 @@
 //! Настройки и сессия на диске: %APPDATA%\FunPayTools\desktop.json
 
 use serde::{Deserialize, Serialize};
+use base64::Engine as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -341,20 +342,74 @@ fn path() -> PathBuf {
     dir().join("desktop.json")
 }
 
+const ENC_PREFIX: &str = "FPTENC1|";
+
+/// Извлечь JSON из файла настроек. Возвращает (текст, был ли открытый текст).
+fn unpack(raw: &str) -> (String, bool) {
+    if let Some(b64) = raw.trim().strip_prefix(ENC_PREFIX) {
+        match base64::engine::general_purpose::STANDARD.decode(b64).ok().and_then(|b| crate::dpapi::unprotect(&b)) {
+            Some(dec) => return (String::from_utf8_lossy(&dec).into_owned(), false),
+            // не расшифровалось (другой пользователь/система): считаем, что сессии нет
+            None => {
+                crate::log::write("Файл настроек не расшифрован: похоже, он создан другим пользователем Windows");
+                return (String::new(), false);
+            }
+        }
+    }
+    (raw.to_string(), true)
+}
+
 impl Config {
     pub fn load() -> Self {
-        std::fs::read_to_string(path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let Ok(raw) = std::fs::read_to_string(path()) else { return Self::default() };
+        let (text, plain) = unpack(&raw);
+        match serde_json::from_str::<Self>(&text) {
+            Ok(c) => {
+                if plain {
+                    // сессия хранилась открытым текстом: сразу перешифровываем
+                    let mut c = c;
+                    c.save();
+                    c
+                } else {
+                    c
+                }
+            }
+            Err(_) => Self::default(),
+        }
     }
 
     pub fn save(&self) {
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = path().with_extension("tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, path());
-            }
+        let Ok(s) = serde_json::to_string_pretty(self) else { return };
+        let body = match crate::dpapi::protect(s.as_bytes()) {
+            Some(enc) => format!("{ENC_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(enc)),
+            // DPAPI недоступен (не Windows): оставляем как было
+            None => s,
+        };
+        let tmp = path().with_extension("tmp");
+        if std::fs::write(&tmp, body).is_ok() {
+            let _ = std::fs::rename(&tmp, path());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unpack_plain_and_encrypted() {
+        let (text, plain) = unpack("{\"theme\":1}");
+        assert_eq!(text, "{\"theme\":1}");
+        assert!(plain);
+        if let Some(enc) = crate::dpapi::protect(b"{\"theme\":2}") {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(enc);
+            let (text, plain) = unpack(&format!("{ENC_PREFIX}{b64}"));
+            assert_eq!(text, "{\"theme\":2}");
+            assert!(!plain);
+        }
+        // мусор после префикса: не паникуем, сессия пустая
+        let (text, plain) = unpack(&format!("{ENC_PREFIX}!!!"));
+        assert_eq!(text, "");
+        assert!(!plain);
     }
 }

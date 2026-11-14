@@ -1,4 +1,4 @@
-#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+﻿#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod ai;
 mod anim;
@@ -24,6 +24,7 @@ mod templates;
 mod update;
 mod demo;
 mod desc;
+mod dpapi;
 mod fp;
 mod fpt;
 mod gchat;
