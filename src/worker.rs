@@ -76,6 +76,7 @@ struct Open {
 }
 
 pub struct Worker {
+    rx: Receiver<Cmd>,
     cfg: Arc<Mutex<Config>>,
     fp: Option<Fp>,
     open: Option<Open>,
@@ -85,6 +86,9 @@ pub struct Worker {
     fails: u32,
     focused: bool,
     force_poll: bool,
+    /// последняя активность (новые сообщения, открытие чата, фокус) — для адаптивного опроса
+    last_activity: Instant,
+    busy_stats: bool,
     gchat: GChat,
     g_active: bool,
     g_disabled: String,
@@ -100,8 +104,9 @@ fn is_fp_chat(kind: i32) -> bool {
 }
 
 impl Worker {
-    fn new(cfg: Arc<Mutex<Config>>) -> Self {
+    fn new(rx: Receiver<Cmd>, cfg: Arc<Mutex<Config>>) -> Self {
         Self {
+            rx,
             cfg,
             fp: None,
             open: None,
@@ -111,6 +116,8 @@ impl Worker {
             fails: 0,
             focused: true,
             force_poll: false,
+            last_activity: Instant::now(),
+            busy_stats: false,
             gchat: GChat::new(),
             g_active: true,
             g_disabled: String::new(),
@@ -135,7 +142,7 @@ impl Worker {
     }
 
     fn me(&mut self) -> Me {
-        let fp = self.fp.as_mut().unwrap();
+        let Some(fp) = self.fp.as_mut() else { return Me::default() };
         let mut avatar = fp.app.avatar.clone();
         if crate::parse::is_default_avatar(&avatar) {
             let uid = fp.app.user_id.clone();
@@ -147,19 +154,36 @@ impl Worker {
     }
 
     /// Страница продаж с повтором, если FunPay просит не спешить (429).
+    /// Ждём «с прерыванием»: команды от интерфейса продолжают обрабатываться.
     fn trade_page_patient(&mut self, cont: &str) -> Result<(Vec<crate::money::TradeItem>, String), String> {
         let mut wait = 4;
         for _ in 0..5 {
             let Some(fp) = self.fp.as_mut() else { return Err("Нет входа в аккаунт".into()) };
-            match fp.trade_page(true, "", cont) {
+            let r = fp.trade_page(true, "", cont);
+            match r {
                 Err(e) if e.contains("429") => {
-                    std::thread::sleep(std::time::Duration::from_secs(wait));
+                    self.nap(std::time::Duration::from_secs(wait));
                     wait *= 2;
                 }
                 r => return r,
             }
         }
         Err("FunPay просит подождать (429)".into())
+    }
+
+    /// Спит, но не перестаёт разгребать команды интерфейса, чтобы клики не копились в очереди.
+    fn nap(&mut self, d: Duration) {
+        let until = Instant::now() + d;
+        while let Some(left) = until.checked_duration_since(Instant::now()) {
+            if left.is_zero() {
+                break;
+            }
+            match self.rx.recv_timeout(left.min(Duration::from_millis(120))) {
+                Ok(cmd) => self.handle(cmd),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
     }
 
     /// Продажи для статистики: из кэша, докачиваем только новое сверху и, если надо, старое снизу.
@@ -183,7 +207,7 @@ impl Worker {
             let empty = cache.items.is_empty();
             loop {
                 if pages > 0 {
-                    std::thread::sleep(pause);
+                    self.nap(pause);
                 }
                 let (items, next) = match self.trade_page_patient(&cont) {
                     Ok(x) => x,
@@ -228,7 +252,7 @@ impl Worker {
         }
         // старое снизу, если кэш ещё не дотягивает до начала периода
         while !cache.covers(cutoff, now) && !cache.tail.is_empty() && pages < 80 {
-            std::thread::sleep(pause);
+            self.nap(pause);
             let tail = cache.tail.clone();
             match self.trade_page_patient(&tail) {
                 Ok((items, next)) => {
@@ -396,6 +420,11 @@ impl Worker {
                 post(move |u| u.stats_loaded(r));
             }
             Cmd::SalesStats { days, gen } => {
+                if self.busy_stats {
+                    post(move |u| u.toast("Статистика ещё считается, подождите"));
+                    return;
+                }
+                self.busy_stats = true;
                 let now = crate::fp::now_msk();
                 let cutoff = match days {
                     0 => None,
@@ -403,6 +432,7 @@ impl Worker {
                     d => Some(now - chrono::Duration::days(d)),
                 };
                 let res = self.sales_stats(cutoff, gen).map(|(items, note)| (crate::money::sales_stats(&items, cutoff, now), note));
+                self.busy_stats = false;
                 self.save_cookies();
                 post(move |u| u.stats_loaded_full(gen, res));
             }
@@ -564,6 +594,7 @@ impl Worker {
             Cmd::Focus(f) => {
                 self.focused = f;
                 if f {
+                    self.last_activity = Instant::now();
                     self.force_poll = true;
                 }
             }
@@ -571,6 +602,7 @@ impl Worker {
     }
 
     fn open_chat(&mut self, id: String, kind: i32, gen: u64) {
+        self.last_activity = Instant::now();
         if kind == 3 {
             self.open = Some(Open {
                 gen,
@@ -762,15 +794,15 @@ impl Worker {
             return;
         }
         let node = o.id.clone();
-        let Some(fp) = self.fp.as_mut() else { return };
         // FunPay не любит пачку картинок подряд (так же делает мобильное приложение)
         if let Some(t) = self.last_image_at {
             let gap = Duration::from_millis(700);
             let el = t.elapsed();
             if el < gap {
-                std::thread::sleep(gap - el);
+                self.nap(gap - el);
             }
         }
+        let Some(fp) = self.fp.as_mut() else { return };
         let res = (|| -> Result<(), String> {
             let (bytes, name, mime) = prepare_image(&path)?;
             let id = fp.upload_chat_image(bytes, &name, &mime)?;
@@ -854,20 +886,30 @@ impl Worker {
     }
 
     fn desc_cleanup(&mut self, code: String, session: Option<String>, text: String) {
-        let Some(fp) = self.fp.as_mut() else { return };
         post(|u| u.desc_progress("Удаляю временный лот…"));
-        let uid = fp.user_id();
         let needle = format!("FPT Verify {code}");
+        let mut uid = String::new();
         let mut deleted = false;
         for _ in 0..3 {
-            if let Some(id) = fp.find_my_offer(&needle) {
-                match fp.delete_offer(&id) {
-                    Ok(()) => deleted = true,
-                    Err(e) => crate::log::write(&format!("удаление лота {id}: {e}")),
-                }
+            let found = self
+                .fp
+                .as_mut()
+                .map(|fp| {
+                    uid = fp.user_id();
+                    fp.find_my_offer(&needle).map(|id| match fp.delete_offer(&id) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            crate::log::write(&format!("удаление лота {id}: {e}"));
+                            false
+                        }
+                    })
+                })
+                .flatten();
+            if let Some(d) = found {
+                deleted = d;
                 break;
             }
-            std::thread::sleep(Duration::from_millis(1500));
+            self.nap(Duration::from_millis(1500));
         }
         self.save_cookies();
         if !deleted {
@@ -901,7 +943,9 @@ impl Worker {
         self.save_cookies();
         match res {
             Ok(()) => {
-                let _ = self.fp.as_mut().unwrap().ensure_auth(true);
+                if let Some(fp) = self.fp.as_mut() {
+                    let _ = fp.ensure_auth(true);
+                }
                 let me = self.me();
                 post(move |u| u.avatar_uploaded(Ok(me)));
             }
@@ -909,10 +953,14 @@ impl Worker {
         }
     }
 
+    /// Пауза между опросами. Когда долго тихо — спрашиваем реже; любая активность
+    /// (новые сообщения, открытый чат, фокус) возвращает обычный темп.
     fn interval(&self) -> Duration {
         let base = if self.focused { 3 } else { 6 };
-        let backoff = if self.fails > 0 { (3u64 << self.fails.min(3)).min(30) } else { base };
-        Duration::from_secs(backoff.max(base))
+        let quiet = self.last_activity.elapsed().as_secs();
+        let stretch = if quiet > 900 { 4 } else if quiet > 300 { 2 } else { 1 };
+        let backoff = if self.fails > 0 { (3u64 << self.fails.min(3)).min(30) } else { base * stretch };
+        Duration::from_secs(backoff.max(base).min(30))
     }
 
     fn tick(&mut self) {
@@ -926,7 +974,7 @@ impl Worker {
     fn poll(&mut self) {
         self.last_poll = Instant::now();
         let open_q = self.open.as_ref().filter(|o| is_fp_chat(o.kind)).map(|o| (o.id.clone(), o.last_id, o.gen));
-        let fp = self.fp.as_mut().unwrap();
+        let Some(fp) = self.fp.as_mut() else { return };
         let mut ctx = self.open.as_mut().map(|o| std::mem::take(&mut o.ctx)).unwrap_or_default();
         let mut res = fp.poll(open_q.as_ref().map(|(n, l, _)| (n.as_str(), *l)), &mut ctx);
         if res.is_err() && open_q.is_some() {
@@ -951,9 +999,13 @@ impl Worker {
                     if !msgs.is_empty() {
                         if let Some(o) = self.open.as_mut() {
                             if o.gen == gen {
-                                o.last_id = msgs.last().unwrap().id.max(o.last_id);
+                                if let Some(last) = msgs.last() {
+                                    o.last_id = last.id.max(o.last_id);
+                                }
                                 if o.first_id == 0 {
-                                    o.first_id = msgs.first().unwrap().id;
+                                    if let Some(first) = msgs.first() {
+                                        o.first_id = first.id;
+                                    }
                                 }
                             }
                         }
@@ -1011,6 +1063,7 @@ impl Worker {
                 continue;
             }
             changed.push((c.clone(), prev.unwrap_or(0)));
+            self.last_activity = Instant::now();
             if let Some(mine) = outgoing.get(&c.id) {
                 let p = c.preview.trim_end_matches("...").trim().to_lowercase();
                 if !p.is_empty() && mine.to_lowercase().starts_with(&p) {
@@ -1130,21 +1183,26 @@ pub fn prepare_image(path: &PathBuf) -> Result<(Vec<u8>, String, String), String
     Ok((out, "image.jpg".into(), "image/jpeg".into()))
 }
 
-pub fn run(rx: Receiver<Cmd>, cfg: Arc<Mutex<Config>>) {
-    let mut w = Worker::new(cfg);
-    w.startup();
-    loop {
-        match rx.recv_timeout(Duration::from_millis(400)) {
-            Ok(cmd) => w.handle(cmd),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
+impl Worker {
+    fn mainloop(&mut self) {
+        self.startup();
+        loop {
+            match self.rx.recv_timeout(Duration::from_millis(400)) {
+                Ok(cmd) => self.handle(cmd),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+            // сначала разгребаем очередь команд, чтобы клики не ждали опроса
+            while let Ok(cmd) = self.rx.try_recv() {
+                self.handle(cmd);
+            }
+            self.tick();
         }
-        // сначала разгребаем очередь команд, чтобы клики не ждали опроса
-        while let Ok(cmd) = rx.try_recv() {
-            w.handle(cmd);
-        }
-        w.tick();
     }
+}
+
+pub fn run(rx: Receiver<Cmd>, cfg: Arc<Mutex<Config>>) {
+    Worker::new(rx, cfg).mainloop();
 }
 
 #[allow(dead_code)]
