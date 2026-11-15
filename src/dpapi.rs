@@ -1,6 +1,7 @@
 //! Шифрование секретов на диске через DPAPI: данные привязаны к пользователю Windows,
 //! расшифровать их может только тот же пользователь на том же ПК.
 
+#[cfg(test)]
 #[cfg(windows)]
 pub fn protect(data: &[u8]) -> Option<Vec<u8>> {
     use windows_sys::Win32::Foundation::{LocalFree, HLOCAL};
@@ -43,6 +44,7 @@ pub fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+#[cfg(test)]
 #[cfg(not(windows))]
 pub fn protect(_data: &[u8]) -> Option<Vec<u8>> {
     None

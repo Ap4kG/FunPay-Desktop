@@ -1,4 +1,4 @@
-﻿#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod ai;
 mod anim;
@@ -8,6 +8,7 @@ mod plugins;
 mod discord;
 mod feat5;
 mod feat6;
+mod feat7;
 mod proxy;
 mod wallpaper;
 mod widgets;
@@ -34,6 +35,7 @@ mod imgcache;
 mod log;
 mod money;
 mod parse;
+mod searchidx;
 mod shot;
 mod stickers;
 mod sys;
@@ -287,6 +289,7 @@ pub fn setup(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, tx: std::sync::mp
         st.set_on_top(c.always_on_top);
         st.set_show_flood(c.show_flood);
         st.set_show_gchat(c.show_gchat);
+        st.set_slow_poll(c.slow_poll);
         st.set_logged_in(!c.golden_key.is_empty() || demo);
         st.set_chats_loading(true);
         st.set_webview_ok(browser::available());
@@ -464,6 +467,15 @@ pub fn setup(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, tx: std::sync::mp
             u.search = q.to_string();
             u.rebuild_chats();
         });
+    });
+    api.on_open_msg_search(|| {
+        with_ui(|u| u.msg_search_open());
+    });
+    api.on_msg_search_query(|q| {
+        with_ui(|u| u.msg_search_query(q.to_string()));
+    });
+    api.on_msg_search_openchat(|id, kind| {
+        with_ui(|u| u.msg_search_openchat(id.to_string(), kind));
     });
     api.on_chat_menu(|id, kind, action, arg| {
         with_ui(|u| u.chat_menu(id.to_string(), kind, action.to_string(), arg.to_string()));
@@ -758,6 +770,7 @@ pub fn setup(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, tx: std::sync::mp
         set_cfg(|c| c.show_gchat = v);
         with_ui(|u| u.rebuild_chats());
     });
+    api.on_set_slow_poll(|v| set_cfg(|c| c.slow_poll = v));
     setup_features(app, cfg, demo);
 }
 

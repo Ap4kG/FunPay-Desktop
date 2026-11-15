@@ -484,6 +484,17 @@ component ChatItemView inherits Rectangle {
                     text: "Открыть на FunPay";
                     activated => { Api.chat-menu(item.id, item.kind, "web", ""); }
                 }
+                MenuSep { }
+                MenuItem {
+                    icon: @image-url("icons/download.svg");
+                    text: "Экспортировать как TXT";
+                    activated => { Api.chat-menu(item.id, item.kind, "export", "txt"); }
+                }
+                MenuItem {
+                    icon: @image-url("icons/download.svg");
+                    text: "Экспортировать как JSON";
+                    activated => { Api.chat-menu(item.id, item.kind, "export", "json"); }
+                }
                 if item.kind == 2: MenuItem {
                     icon: @image-url("icons/close.svg");
                     text: "Убрать из недавних";
@@ -585,6 +596,15 @@ export component ChatListPane inherits Rectangle {
                 }
             }
             // сайт FunPay в мини-окне: купить то, чего в приложении пока нет
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    size: 36px;
+                    icon-size: 24px;
+                    icon: @image-url("icons/search.svg");
+                    clicked => { Api.open-msg-search(); }
+                }
+            }
             VerticalLayout {
                 alignment: center;
                 IconButton {

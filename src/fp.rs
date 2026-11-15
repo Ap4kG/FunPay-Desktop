@@ -147,16 +147,16 @@ fn fill_required(f: &mut crate::lots::Form, code: &str, force: &[String]) {
 
 pub fn http_client(timeout: u64) -> Client {
     client_with(timeout, false, None).unwrap_or_else(|e| {
-        crate::log::write(&format!("HTTP-клиент не собрался ({e}), берём простой"));
-        Client::new()
+        crate::log::write(&format!("HTTP-клиент не собрался: {e}"));
+        panic!("Не удалось создать HTTP-клиент с таймаутом {timeout} секунд: {e}")
     })
 }
 
 /// Клиент для картинок и стикеров: идёт по редиректам (нужно для зеркал GitHub/CDN).
 pub fn http_client_follow(timeout: u64) -> Client {
     client_with(timeout, true, None).unwrap_or_else(|e| {
-        crate::log::write(&format!("HTTP-клиент не собрался ({e}), берём простой"));
-        Client::new()
+        crate::log::write(&format!("HTTP-клиент не собрался: {e}"));
+        panic!("Не удалось создать HTTP-клиент с таймаутом {timeout} секунд: {e}")
     })
 }
 

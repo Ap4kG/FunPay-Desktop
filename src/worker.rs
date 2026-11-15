@@ -5,7 +5,7 @@ use crate::fp::{self, Fp};
 use crate::gchat::{GChat, GMsg};
 use crate::parse::{AuthorCtx, ChatItem, Message};
 use crate::ui::{post, Me, OpenedChat};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -64,6 +64,8 @@ pub enum Cmd {
     LotActive { id: String, node: String, on: bool },
     LotCopy { id: String, node: String },
     LotDelete { id: String },
+    /// Экспорт чата: догрузить всю историю и записать файл
+    ExportChat { id: String, kind: i32, path: PathBuf, json: bool, name: String },
 }
 
 struct Open {
@@ -92,7 +94,7 @@ pub struct Worker {
     force_poll: bool,
     /// последняя активность (новые сообщения, открытие чата, фокус) — для адаптивного опроса
     last_activity: Instant,
-    busy_stats: bool,
+    deferred: VecDeque<Cmd>,
     gchat: GChat,
     g_active: bool,
     g_disabled: String,
@@ -121,7 +123,7 @@ impl Worker {
             focused: true,
             force_poll: false,
             last_activity: Instant::now(),
-            busy_stats: false,
+            deferred: VecDeque::new(),
             gchat: GChat::new(),
             g_active: true,
             g_disabled: String::new(),
@@ -178,12 +180,21 @@ impl Worker {
     /// Спит, но не перестаёт разгребать команды интерфейса, чтобы клики не копились в очереди.
     fn nap(&mut self, d: Duration) {
         let until = Instant::now() + d;
+        let mut deferred = false;
         while let Some(left) = until.checked_duration_since(Instant::now()) {
             if left.is_zero() {
                 break;
             }
+            if deferred {
+                std::thread::sleep(left);
+                break;
+            }
             match self.rx.recv_timeout(left.min(Duration::from_millis(120))) {
-                Ok(cmd) => self.handle(cmd),
+                Ok(cmd @ Cmd::Focus(_)) => self.handle(cmd),
+                Ok(cmd) => {
+                    self.deferred.push_back(cmd);
+                    deferred = true;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -424,11 +435,6 @@ impl Worker {
                 post(move |u| u.stats_loaded(r));
             }
             Cmd::SalesStats { days, gen } => {
-                if self.busy_stats {
-                    post(move |u| u.toast("Статистика ещё считается, подождите"));
-                    return;
-                }
-                self.busy_stats = true;
                 let now = crate::fp::now_msk();
                 let cutoff = match days {
                     0 => None,
@@ -436,7 +442,6 @@ impl Worker {
                     d => Some(now - chrono::Duration::days(d)),
                 };
                 let res = self.sales_stats(cutoff, gen).map(|(items, note)| (crate::money::sales_stats(&items, cutoff, now), note));
-                self.busy_stats = false;
                 self.save_cookies();
                 post(move |u| u.stats_loaded_full(gen, res));
             }
@@ -604,7 +609,132 @@ impl Worker {
                     self.force_poll = true;
                 }
             }
+            Cmd::ExportChat { id, kind, path, json, name } => self.export_chat(&id, kind, path, json, &name),
         }
+    }
+
+    /// Экспорт переписки: идут страницами истории (новые → старые), затем файл.
+    /// Между страницами пауза, чтобы FunPay не ограничивал.
+    fn export_chat(&mut self, id: &str, kind: i32, path: PathBuf, json: bool, name: &str) {
+        let mut out: Vec<crate::parse::Message> = Vec::new();
+        let mut truncated = false;
+        if kind == 3 {
+            match self.gchat.fetch(0) {
+                Ok(g) => {
+                    out = g
+                        .into_iter()
+                        .map(|m| crate::parse::Message {
+                            id: m.ts.max(0) as u64,
+                            author: m.nick,
+                            text: m.text,
+                            ..Default::default()
+                        })
+                        .collect();
+                }
+                Err(e) => {
+                    post(move |u| u.toast(&format!("Экспорт не удался: {e}")));
+                    return;
+                }
+            }
+        } else {
+            if self.fp.is_none() {
+                post(|u| u.toast("Нет входа в аккаунт"));
+                return;
+            }
+            let mut ctx = AuthorCtx::default();
+            let mut node = id.to_string();
+            // если чат сейчас открыт — известен настоящий hist_node
+            if let Some(o) = &self.open {
+                if o.id == id && !o.hist_node.is_empty() {
+                    node = o.hist_node.clone();
+                }
+            }
+            let pause = Duration::from_millis(700);
+            let mut before: Option<u64> = None;
+            let mut pages = 0;
+            loop {
+                let page = match self.fp.as_mut() {
+                    Some(fp) => fp.history(&node, before, &mut ctx),
+                    None => {
+                        post(|u| u.toast("Экспорт прерван: нет входа в аккаунт"));
+                        return;
+                    }
+                };
+                match page {
+                    Ok((msgs, more, node_name)) => {
+                        if !node_name.is_empty() {
+                            node = node_name;
+                        }
+                        let n = msgs.len();
+                        out.extend(msgs);
+                        pages += 1;
+                        if !more || n == 0 {
+                            break;
+                        }
+                        if pages >= 400 {
+                            truncated = true;
+                            break;
+                        }
+                        before = out.iter().map(|m| m.id).min();
+                        self.nap(pause);
+                    }
+                    Err(e) => {
+                        post(move |u| u.toast(&format!("Экспорт не удался: {e}")));
+                        return;
+                    }
+                }
+            }
+            out.sort_by_key(|m| m.id);
+            out.dedup_by_key(|m| m.id);
+        }
+        if truncated {
+            crate::log::write(&format!("Экспорт чата {id}: достигнут лимит в 400 страниц"));
+        }
+        self.save_cookies();
+        let ok = (|| -> std::io::Result<()> {
+            if json {
+                let msgs: Vec<serde_json::Value> = out
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "date": m.ts.map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_else(|| m.date_raw.clone()),
+                            "author": m.author,
+                            "text": m.text,
+                            "image": m.image,
+                        })
+                    })
+                    .collect();
+                let doc = serde_json::json!({ "chat_id": id, "name": name, "exported_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), "truncated": truncated, "messages": msgs });
+                let bytes = serde_json::to_vec_pretty(&doc)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                std::fs::write(&path, bytes)
+            } else {
+                use std::io::Write;
+                let mut f = std::io::BufWriter::new(std::fs::File::create(&path)?);
+                writeln!(f, "Переписка: {name}")?;
+                writeln!(f, "Экспорт: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))?;
+                if truncated {
+                    writeln!(f, "Внимание: достигнут лимит экспорта, история может быть неполной.")?;
+                }
+                writeln!(f)?;
+                for m in &out {
+                    let date = m.ts.map(|t| t.format("%d.%m.%Y %H:%M:%S").to_string()).unwrap_or_else(|| m.date_raw.clone());
+                    writeln!(f, "[{date}] {}: {}", m.author, m.text)?;
+                    if let Some(img) = &m.image {
+                        writeln!(f, "    [изображение: {img}]")?;
+                    }
+                }
+                f.flush()
+            }
+        })();
+        let n = out.len();
+        post(move |u| {
+            match ok {
+                Ok(()) if truncated => u.toast(&format!("Экспортирована часть истории: {n} сообщений")),
+                Ok(()) => u.toast(&format!("Экспорт готов: {n} сообщений")),
+                Err(e) => u.toast(&format!("Не удалось записать файл: {e}")),
+            }
+        });
     }
 
     fn open_chat(&mut self, id: String, kind: i32, gen: u64) {
@@ -1029,7 +1159,8 @@ impl Worker {
     fn interval(&self) -> Duration {
         let base = if self.focused { 3 } else { 6 };
         let quiet = self.last_activity.elapsed().as_secs();
-        let stretch = if quiet > 900 { 4 } else if quiet > 300 { 2 } else { 1 };
+        let slow_poll = self.cfg.lock().unwrap().slow_poll;
+        let stretch = if slow_poll && quiet > 900 { 4 } else if slow_poll && quiet > 300 { 2 } else { 1 };
         let backoff = if self.fails > 0 { (3u64 << self.fails.min(3)).min(30) } else { base * stretch };
         Duration::from_secs(backoff.max(base).min(30))
     }
@@ -1258,12 +1389,20 @@ impl Worker {
     fn mainloop(&mut self) {
         self.startup();
         loop {
-            match self.rx.recv_timeout(Duration::from_millis(400)) {
+            let next = if let Some(cmd) = self.deferred.pop_front() {
+                Ok(cmd)
+            } else {
+                self.rx.recv_timeout(Duration::from_millis(400))
+            };
+            match next {
                 Ok(cmd) => self.handle(cmd),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             // сначала разгребаем очередь команд, чтобы клики не ждали опроса
+            while let Some(cmd) = self.deferred.pop_front() {
+                self.handle(cmd);
+            }
             while let Ok(cmd) = self.rx.try_recv() {
                 self.handle(cmd);
             }
@@ -1274,6 +1413,39 @@ impl Worker {
 
 pub fn run(rx: Receiver<Cmd>, cfg: Arc<Mutex<Config>>) {
     Worker::new(rx, cfg).mainloop();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nap_defers_commands_that_could_switch_accounts() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut cfg = Config::default();
+        cfg.golden_key = "current-account".into();
+        let cfg = Arc::new(Mutex::new(cfg));
+        let mut worker = Worker::new(rx, cfg.clone());
+        tx.send(Cmd::Logout).unwrap();
+
+        worker.nap(Duration::from_millis(10));
+
+        assert_eq!(cfg.lock().unwrap().golden_key, "current-account");
+        assert!(matches!(worker.deferred.pop_front(), Some(Cmd::Logout)));
+    }
+
+    #[test]
+    fn quiet_poll_slowdown_is_opt_in() {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let cfg = Arc::new(Mutex::new(Config::default()));
+        let mut worker = Worker::new(rx, cfg.clone());
+        worker.focused = false;
+        worker.last_activity = Instant::now() - Duration::from_secs(16 * 60);
+        assert_eq!(worker.interval(), Duration::from_secs(6));
+
+        cfg.lock().unwrap().slow_poll = true;
+        assert_eq!(worker.interval(), Duration::from_secs(24));
+    }
 }
 
 #[allow(dead_code)]

@@ -172,6 +172,9 @@ pub struct Ext {
     pub frozen: String,
     pub lots_gen: u64,
     pub lots: Vec<crate::lots::MyLot>,
+    /// глобальный поиск по сообщениям: номер запроса, чтобы старые ответы не мешали
+    pub ms_gen: u64,
+    pub search_backfill_uid: String,
     pub lots_query: String,
     pub lots_filter: i32,
     pub lot_lang: i32,
@@ -419,6 +422,8 @@ impl Ui {
             s.set_browser_login(false);
         });
         self.update_me();
+        let uid = self.me.id.clone();
+        self.load_cache_for(&uid);
         self.rebuild_chats();
         self.tour_event("logged-in");
         self.stats_tick();
@@ -838,6 +843,7 @@ impl Ui {
                 }
                 self.toast("Убрал из недавних");
             }
+            "export" => self.export_chat(id, kind, arg == "json"),
             _ => {}
         }
         self.rebuild_chats();
@@ -1013,6 +1019,8 @@ impl Ui {
         let nick = self.nick(&title);
         self.st(|s| s.set_cur_nick(nick));
         self.save_msgs_cache();
+        let msgs: Vec<Message> = self.cur.as_ref().map(|c| c.msgs.clone()).unwrap_or_default();
+        self.index_chat(&msgs);
         self.rebuild_templates();
     }
 
@@ -1116,6 +1124,8 @@ impl Ui {
         });
         self.rebuild_msgs();
         self.save_msgs_cache();
+        let msgs: Vec<Message> = self.cur.as_ref().map(|c| c.msgs.clone()).unwrap_or_default();
+        self.index_chat(&msgs);
         self.rebuild_templates();
     }
 
@@ -1179,6 +1189,8 @@ impl Ui {
         });
         if n > 0 {
             self.rebuild_msgs();
+            let all = self.cur.as_ref().map(|c| c.msgs.clone()).unwrap_or_default();
+            self.index_chat(&all);
         }
     }
 
@@ -3040,6 +3052,8 @@ impl Ui {
 
     /// Сбрасывает всё, что относится к прежнему аккаунту: чаты, экраны, вкладки браузера.
     pub fn reset_account_view(&mut self) {
+        crate::searchidx::set_account("");
+        self.ext.search_backfill_uid.clear();
         self.chats.clear();
         self.cur = None;
         self.pending.clear();
@@ -3081,6 +3095,7 @@ impl Ui {
         self.reset_account_view();
         self.me = Me { id: acc.id.clone(), name: acc.name.clone(), avatar: acc.avatar.clone(), balance: String::new() };
         self.update_me();
+        self.load_cache_for(&acc.id);
         self.rebuild_accounts();
         self.toast(&format!("Аккаунт {}", acc.name));
         self.send(Cmd::UseAccount { gk: acc.golden_key, cookies: acc.cookies });
@@ -3140,6 +3155,7 @@ impl Ui {
             c.save();
         }
         crate::cache::forget(&id);
+        crate::searchidx::forget(&id);
         self.rebuild_accounts();
         self.toast("Аккаунт убран с этого компьютера");
     }
