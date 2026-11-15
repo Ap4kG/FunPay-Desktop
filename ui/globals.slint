@@ -1,4 +1,4 @@
-import { ChatRow, FolderRow, MsgRow, Tile, OfferRow, ReviewRow, KV, PackRow, StickerCell, TradeRow, TxnRow, BrowserTab, AccountRow, NickStyle, StatTile, SchedRow, PackItem, TplRow, AutoRow, LotRow, LotSection, LotFieldRow, ThemeCard, Anim, PluginRow, PUiRow, PCell, CatPlugin, CatPack } from "types.slint";
+import { ChatRow, FolderRow, MsgRow, Tile, OfferRow, ReviewRow, KV, PackRow, StickerCell, TradeRow, TxnRow, BrowserTab, AccountRow, NickStyle, StatTile, SchedRow, PackItem, TplRow, AutoRow, LotRow, LotSection, LotFieldRow, ThemeCard, Anim, PluginRow, PUiRow, PCell, CatPlugin, CatPack, Ring, DecorBanner, AccPlan, AccNick } from "types.slint";
 
 export global St {
     in-out property <string> version;
@@ -233,6 +233,45 @@ export global St {
     // цветные ники
     in-out property <bool> epic-anim: true;
     in-out property <NickStyle> me-nick;
+    // рамки и баннеры FunPay Tools
+    in-out property <[image]> decor-frames;
+    in-out property <[bool]> decor-has;
+    in-out property <[Ring]> decor-rings;
+    in-out property <[DecorBanner]> decor-banners;
+    in-out property <int> me-frame;
+    in-out property <int> pf-frame;
+    in-out property <int> card-frame;
+    // 0: баннер из описания (обложка), больше 0: тонкий баннер FunPay Tools с этим соотношением сторон
+    in-out property <float> pf-banner-ar;
+    // аккаунт FunPay Tools: вход через Telegram, PRO, ники, украшения
+    in-out property <bool> acc-open;
+    in-out property <bool> acc-tg;
+    in-out property <string> acc-tg-name;
+    in-out property <bool> acc-loading;
+    in-out property <bool> acc-busy;
+    in-out property <string> acc-msg;
+    in-out property <bool> acc-msg-err;
+    in-out property <string> acc-pro;
+    in-out property <string> acc-nick-count;
+    in-out property <[AccPlan]> acc-plans;
+    in-out property <string> acc-pay-product;
+    in-out property <int> acc-pay-step;          // 0 нет, 1 выбор способа, 2 счёт создан
+    in-out property <string> acc-pay-title;
+    in-out property <string> acc-pay-state;
+    in-out property <bool> acc-can-add;
+    in-out property <string> acc-add-title;
+    in-out property <string> acc-add-note;
+    in-out property <[AccNick]> acc-nicks;
+    in-out property <int> acc-df;
+    in-out property <int> acc-db;
+    in-out property <bool> acc-has-frame;
+    in-out property <bool> acc-has-banner;
+    in-out property <string> acc-r-frame;
+    in-out property <string> acc-r-banner;
+    in-out property <string> acc-price-frame;
+    in-out property <string> acc-price-banner;
+    in-out property <string> acc-decor-msg;
+    in-out property <bool> acc-decor-err;
     in-out property <NickStyle> cur-nick;
     in-out property <NickStyle> pf-nick;
     in-out property <NickStyle> card-nick;
@@ -545,6 +584,18 @@ export global Api {
     // цветные ники
     callback set-epic-anim(bool);
     callback epic-get();
+    // аккаунт FunPay Tools
+    callback acc-show();
+    callback acc-tg-login();
+    callback acc-tg-logout();
+    callback acc-reload();
+    callback acc-buy(string);
+    callback acc-pay(string);
+    callback acc-pay-check();
+    callback acc-add-nick(string);
+    callback acc-style(int, string);
+    callback acc-pick(int, int);
+    callback acc-decor-save();
     // уведомления
     callback pop-set(string, int);
     callback pop-test();

@@ -147,6 +147,16 @@ pub struct Ext {
     pub txns: Vec<crate::money::Txn>,
     pub desc_gen: u64,
     pub banner_url: String,
+    /// картинки рамок и баннеров FunPay Tools: ключ кэша → (0 рамка / 1 баннер, номер)
+    pub decor_keys: HashMap<String, (u8, i32)>,
+    /// профиль аккаунта FunPay Tools из бота (ответ на job "me")
+    pub acc: Option<serde_json::Value>,
+    /// что сделать после подтверждения аккаунта FunPay
+    pub acc_after: Option<crate::fptacc::After>,
+    /// текущий счёт: (tid, товар), и номер, чтобы старые проверки не мешали новым
+    pub acc_pay: Option<(String, String)>,
+    pub acc_pay_gen: u64,
+    pub acc_login_gen: u64,
     pub descs: HashMap<String, (std::time::Instant, crate::desc::Desc)>,
     pub card_uid: String,
     pub tabs: Vec<crate::ui::Tab>,
@@ -366,6 +376,7 @@ impl Ui {
             self.start_plugins();
         }
         self.me = me;
+        self.decor_heads();
         self.ext.adding = false;
         self.ext.add_tried = false;
         self.st(|s| s.set_adding_account(false));
@@ -560,6 +571,7 @@ impl Ui {
             fpt: false,
             check,
             nick: self.nick(&ch.name),
+            frame: self.chat_frame(&ch.name),
         }
     }
 
@@ -1470,6 +1482,7 @@ impl Ui {
                 show_author,
                 author: author_name.into(),
                 author_id: first.author_id.clone().into(),
+                frame: if show_avatar { self.user_frame(&first.author_id) } else { 0 },
                 author_color,
                 show_avatar,
                 has_avatar: av_img.is_some(),
@@ -1729,6 +1742,7 @@ impl Ui {
             self.deals_image(&key);
         }
         self.desc_image(&key, &img);
+        self.decor_image_ready(&key, &img);
         self.accounts_image(&key);
         if !self.sendbox.is_empty() && key.starts_with(&format!("{THUMB}|file://")) {
             self.rebuild_sendbox();
@@ -1798,6 +1812,7 @@ impl Ui {
         match res {
             Ok(me) => {
                 self.me = me;
+        self.decor_heads();
                 self.update_me();
                 self.toast("Аватарка обновлена");
             }
@@ -1894,6 +1909,7 @@ impl Ui {
             s.set_card_open(true);
         });
         self.ext.card_uid = if kind == 0 { peer.clone() } else { String::new() };
+        self.decor_heads();
         self.st(|s| s.set_card_desc("".into()));
         if kind == 0 && !peer.is_empty() {
             self.load_desc(peer.clone());
@@ -1927,6 +1943,7 @@ impl Ui {
         self.st(|s| {
             s.set_pf_desc("".into());
             s.set_pf_has_banner(false);
+            s.set_pf_banner_ar(0.0);
         });
         self.load_desc(uid.clone());
         self.send(Cmd::LoadProfile { uid, gen: self.pf_gen, card: false });
@@ -2004,6 +2021,7 @@ impl Ui {
                     }
                 });
                 self.profile = Some(p);
+                self.decor_heads();
             }
         }
     }
@@ -2754,7 +2772,9 @@ impl Ui {
                 s.set_pf_desc(d.text.clone().into());
                 s.set_pf_has_banner(banner.is_some());
                 s.set_pf_banner(banner.unwrap_or_default());
+                s.set_pf_banner_ar(0.0);
             });
+            self.decor_pf_banner();
         }
         if self.ext.card_uid == uid {
             self.st(|s| s.set_card_desc(d.text.clone().into()));

@@ -115,7 +115,7 @@ export component EpicDialog inherits Card {
         }
         PrimaryButton {
             text: "Получить уникальный ник";
-            clicked => { Api.epic-get(); }
+            clicked => { St.epic-open = false; Api.acc-show(); }
         }
         HorizontalLayout {
             spacing: 10px;

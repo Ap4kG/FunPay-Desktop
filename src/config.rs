@@ -56,6 +56,10 @@ pub struct Config {
     pub known_chats: BTreeMap<String, (i32, String)>,
     /// Сессия сервера описаний FunPay Tools: (id на FunPay, токен)
     pub desc_session: (String, String),
+    /// Сессия сервера аккаунтов FunPay Tools (fpt-promo): (id на FunPay, токен подтверждения аккаунта)
+    pub promo_session: (String, String),
+    /// Вход в аккаунт FunPay Tools через Telegram-бота: (сессия, подпись @username)
+    pub fpt_tg: (String, String),
     /// Импортированная тема Telegram
     pub tg_theme: Option<TgTheme>,
     /// Все добавленные аккаунты (текущий тоже), ключи и куки только здесь, на этом ПК
@@ -308,6 +312,8 @@ impl Default for Config {
             recent_stickers: Vec::new(),
             known_chats: BTreeMap::new(),
             desc_session: (String::new(), String::new()),
+            promo_session: (String::new(), String::new()),
+            fpt_tg: (String::new(), String::new()),
             tg_theme: None,
             accounts: Vec::new(),
             keep_background: true,

@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { Anim } from "types.slint";
+import { Anim, Ring } from "types.slint";
 import { Api, St } from "globals.slint";
 
 export component IconButton inherits Rectangle {
@@ -34,30 +34,46 @@ export component Avatar inherits Rectangle {
     in property <color> c2: #3A86E0;
     in property <length> size: 44px;
     in property <int> kind: 0;
+    // рамка FunPay Tools (номер из каталога, 0 нет): рисуется поверх круга и выходит за его края
+    in property <int> frame: 0;
+    property <bool> framed: frame > 0 && frame <= St.decor-frames.length && frame <= St.decor-has.length && St.decor-has[frame - 1] && frame <= St.decor-rings.length;
     width: size;
     height: size;
-    border-radius: size / 2;
-    clip: true;
-    background: @linear-gradient(160deg, c1 0%, c2 100%);
-    if !has-img && kind == 0: Text {
-        text: letter;
-        color: white;
-        font-size: size * 0.4;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    Rectangle {
+        width: root.size;
+        height: root.size;
+        border-radius: root.size / 2;
+        clip: true;
+        background: @linear-gradient(160deg, root.c1 0%, root.c2 100%);
+        if !root.has-img && root.kind == 0: Text {
+            text: root.letter;
+            color: white;
+            font-size: root.size * 0.4;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if !root.has-img && root.kind != 0: Image {
+            width: root.size * 0.52;
+            height: root.size * 0.52;
+            colorize: white;
+            source: root.kind == 1 ? @image-url("icons/public.svg") : root.kind == 2 ? @image-url("icons/sports_esports-fill.svg") : @image-url("icons/forum-fill.svg");
+        }
+        if root.has-img: Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.img;
+            image-fit: cover;
+        }
     }
-    if !has-img && kind != 0: Image {
-        width: size * 0.52;
-        height: size * 0.52;
-        colorize: white;
-        source: kind == 1 ? @image-url("icons/public.svg") : kind == 2 ? @image-url("icons/sports_esports-fill.svg") : @image-url("icons/forum-fill.svg");
-    }
-    if has-img: Image {
-        width: parent.width;
-        height: parent.height;
-        source: img;
-        image-fit: cover;
+    if root.framed: Image {
+        property <Ring> rg: St.decor-rings[root.frame - 1];
+        width: root.size / max(0.3, self.rg.k);
+        height: self.width;
+        x: (root.size - self.width) / 2 - self.rg.dx * self.width;
+        y: (root.size - self.height) / 2 - self.rg.dy * self.height;
+        source: St.decor-frames[root.frame - 1];
+        image-fit: fill;
     }
 }
 

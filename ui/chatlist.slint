@@ -196,6 +196,7 @@ export component Rail inherits Rectangle {
                 letter: St.me-letter;
                 c1: #8E9BFF;
                 c2: #5B6CF0;
+                frame: St.me-frame;
             }
             TouchArea {
                 mouse-cursor: pointer;
@@ -322,6 +323,7 @@ component ChatItemView inherits Rectangle {
                 c1: item.c1;
                 c2: item.c2;
                 kind: item.kind;
+                frame: item.frame;
             }
         }
         VerticalLayout {

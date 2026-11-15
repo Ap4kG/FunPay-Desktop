@@ -24,6 +24,8 @@ mod templates;
 mod update;
 mod demo;
 mod desc;
+mod decor;
+mod fptacc;
 mod fp;
 mod fpt;
 mod gchat;
@@ -785,6 +787,13 @@ fn setup_features(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, demo: bool) 
         }
     });
     epic::load(|| post(|u| u.epic_loaded()));
+    // рамки и баннеры FunPay Tools: сразу с диска, потом из сети и раз в 5 минут
+    with_ui(|u| u.decor_init());
+    decor::load(|| post(|u| u.decor_loaded()));
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(300));
+        decor::load(|| post(|u| u.decor_loaded()));
+    });
     let api = app.global::<Api>();
 
     // обучение при первом запуске (в демо только по FPT_TOUR)
@@ -940,6 +949,40 @@ fn setup_features(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, demo: bool) 
     });
     api.on_set_epic_anim(|v| set_cfg(|c| c.epic_anim = v));
     api.on_epic_get(|| sys::open_external("https://t.me/FPToolsBot"));
+    // аккаунт FunPay Tools
+    api.on_acc_show(|| {
+        with_ui(|u| u.acc_show());
+    });
+    api.on_acc_tg_login(|| {
+        with_ui(|u| u.acc_tg_login());
+    });
+    api.on_acc_tg_logout(|| {
+        with_ui(|u| u.acc_tg_logout());
+    });
+    api.on_acc_reload(|| {
+        with_ui(|u| u.acc_reload());
+    });
+    api.on_acc_buy(|p| {
+        with_ui(|u| u.acc_buy(p.to_string()));
+    });
+    api.on_acc_pay(|m| {
+        with_ui(|u| u.acc_pay(m.to_string()));
+    });
+    api.on_acc_pay_check(|| {
+        with_ui(|u| u.acc_pay_check());
+    });
+    api.on_acc_add_nick(|k| {
+        with_ui(|u| u.acc_add_nick(k.to_string()));
+    });
+    api.on_acc_style(|i, k| {
+        with_ui(|u| u.acc_style(i, k.to_string()));
+    });
+    api.on_acc_pick(|k, id| {
+        with_ui(|u| u.acc_pick(k, id));
+    });
+    api.on_acc_decor_save(|| {
+        with_ui(|u| u.acc_decor_save());
+    });
     api.on_open_contact(|c| {
         sys::open_external(if c == "ds" { "https://discord.gg/c8A9v58CQw" } else { "https://t.me/fptools" });
     });
