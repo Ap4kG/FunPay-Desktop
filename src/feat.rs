@@ -707,7 +707,6 @@ impl Ui {
     pub fn load_cache_for(&mut self, uid: &str) {
         self.ext.ms_gen += 1;
         self.st(|s| {
-            s.set_msg_search_open(false);
             s.set_msg_search_loading(false);
             s.set_search_results(slint::ModelRc::default());
         });

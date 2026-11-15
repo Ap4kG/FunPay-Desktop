@@ -175,6 +175,7 @@ pub struct Ext {
     /// глобальный поиск по сообщениям: номер запроса, чтобы старые ответы не мешали
     pub ms_gen: u64,
     pub search_backfill_uid: String,
+    pub search_jump: Option<(String, u64)>,
     pub lots_query: String,
     pub lots_filter: i32,
     pub lot_lang: i32,
@@ -1021,6 +1022,7 @@ impl Ui {
         self.save_msgs_cache();
         let msgs: Vec<Message> = self.cur.as_ref().map(|c| c.msgs.clone()).unwrap_or_default();
         self.index_chat(&msgs);
+        self.check_msg_search_jump();
         self.rebuild_templates();
     }
 
@@ -1191,6 +1193,14 @@ impl Ui {
             self.rebuild_msgs();
             let all = self.cur.as_ref().map(|c| c.msgs.clone()).unwrap_or_default();
             self.index_chat(&all);
+        }
+        if self.ext.search_jump.is_some() {
+            if n == 0 {
+                self.ext.search_jump = None;
+                self.toast("Не удалось догрузить историю до найденного сообщения");
+            } else {
+                self.check_msg_search_jump();
+            }
         }
     }
 
@@ -3054,6 +3064,7 @@ impl Ui {
     pub fn reset_account_view(&mut self) {
         crate::searchidx::set_account("");
         self.ext.search_backfill_uid.clear();
+        self.ext.search_jump = None;
         self.chats.clear();
         self.cur = None;
         self.pending.clear();

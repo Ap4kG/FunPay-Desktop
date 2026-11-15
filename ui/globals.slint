@@ -185,9 +185,7 @@ export global St {
     in-out property <bool> show-flood: true;
     in-out property <bool> show-gchat: true;
     in-out property <bool> slow-poll;
-    in-out property <bool> msg-search-open;
     in-out property <bool> msg-search-loading;
-    in-out property <string> msg-search-q;
     in-out property <string> msg-search-hint;
     in-out property <[SearchRow]> search-results;
     in-out property <bool> avatar-busy;
@@ -481,9 +479,7 @@ export global Api {
     // список
     callback select-folder(string);
     callback search-changed(string);
-    callback open-msg-search();
-    callback msg-search-query(string);
-    callback msg-search-openchat(string, int);
+    callback msg-search-openchat(string, int, string);
     callback chat-menu(string, int, string, string);   // id, kind, действие, аргумент
     callback create-folder(string);
     callback delete-folder(string);

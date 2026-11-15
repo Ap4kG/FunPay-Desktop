@@ -1,11 +1,11 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { St, Api } from "globals.slint";
-import { OfferRow, ReviewRow, KV, SearchRow } from "types.slint";
+import { OfferRow, ReviewRow, KV } from "types.slint";
 import { IconButton, Avatar, Pill, Toggle, SettingRow, PrimaryButton, LinkText, MenuItem, MenuCard, Dim, TourMark, AnimImage } from "widgets.slint";
 import { Album } from "chatview.slint";
 import { EpicNick } from "epic.slint";
-import { Contacts, Card } from "extras.slint";
+import { Contacts } from "extras.slint";
 
 // ============================================================ браузер
 
@@ -1695,62 +1695,4 @@ export component SendBox inherits Rectangle {
         }
     }
     init => { cap.focus(); }
-}
-
-export component MsgSearchDialog inherits Card {
-    w: 640px;
-    close => { St.msg-search-open = false; }
-    property <length> cw: min(640px, root.width - 24px) - 44px;
-    VerticalLayout {
-        padding: 22px;
-        spacing: 12px;
-        HorizontalLayout {
-            Text { text: "Поиск по сообщениям"; color: Theme.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
-            IconButton { icon: @image-url("icons/close.svg"); clicked => { St.msg-search-open = false; } }
-        }
-        Rectangle {
-            height: 42px;
-            border-radius: 10px;
-            background: Theme.field;
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                Image { source: @image-url("icons/search.svg"); width: 18px; colorize: Theme.faint; }
-                TextInput {
-                    text <=> St.msg-search-q;
-                    font-size: 14px;
-                    color: Theme.ink;
-                    single-line: true;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    edited => { Api.msg-search-query(self.text); }
-                }
-            }
-        }
-        Text { text: St.msg-search-loading ? "Ищу…" : St.msg-search-hint; color: Theme.muted; font-size: 12.5px; }
-        ScrollView {
-            height: max(100px, min(340px, root.height - 180px));
-            width: root.cw;
-            for r in St.search-results: Rectangle {
-                width: parent.width;
-                height: row.preferred-height + 14px;
-                border-radius: 9px;
-                background: tap.has-hover ? Theme.hover : transparent;
-                row := VerticalLayout {
-                    padding: 8px;
-                    spacing: 3px;
-                    HorizontalLayout {
-                        Text { text: r.chat_name; color: Theme.ink; font-size: 13px; font-weight: 650; overflow: elide; horizontal-stretch: 1; }
-                        Text { text: r.date; color: Theme.faint; font-size: 11px; }
-                    }
-                    Text { text: r.author; color: Theme.accent; font-size: 11.5px; overflow: elide; }
-                    Text { text: r.text; color: Theme.muted; font-size: 12.5px; max-lines: 2; overflow: elide; wrap: word-wrap; }
-                }
-                tap := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { Api.msg-search-openchat(r.chat_id, r.kind); }
-                }
-            }
-        }
-    }
 }

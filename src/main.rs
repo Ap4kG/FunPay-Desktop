@@ -466,16 +466,11 @@ pub fn setup(app: &AppWindow, cfg: Arc<Mutex<config::Config>>, tx: std::sync::mp
         with_ui(|u| {
             u.search = q.to_string();
             u.rebuild_chats();
+            u.msg_search_query(q.to_string());
         });
     });
-    api.on_open_msg_search(|| {
-        with_ui(|u| u.msg_search_open());
-    });
-    api.on_msg_search_query(|q| {
-        with_ui(|u| u.msg_search_query(q.to_string()));
-    });
-    api.on_msg_search_openchat(|id, kind| {
-        with_ui(|u| u.msg_search_openchat(id.to_string(), kind));
+    api.on_msg_search_openchat(|id, kind, message_id| {
+        with_ui(|u| u.msg_search_openchat(id.to_string(), kind, message_id.to_string()));
     });
     api.on_chat_menu(|id, kind, action, arg| {
         with_ui(|u| u.chat_menu(id.to_string(), kind, action.to_string(), arg.to_string()));

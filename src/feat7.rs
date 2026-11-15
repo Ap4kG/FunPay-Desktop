@@ -26,27 +26,15 @@ impl Ui {
 
     // ------------------------------------------------------------ поиск
 
-    pub fn msg_search_open(&mut self) {
-        self.ext.ms_gen += 1;
-        self.st(|s| {
-            s.set_msg_search_open(true);
-            s.set_msg_search_loading(false);
-            s.set_msg_search_q("".into());
-            s.set_msg_search_hint("".into());
-            s.set_search_results(model(vec![]));
-        });
-    }
-
     pub fn msg_search_query(&mut self, q: String) {
         let q = q.trim().to_string();
         let chars = q.chars().count();
-        self.st(|s| s.set_msg_search_q(q.clone().into()));
         if chars < 2 {
             self.ext.ms_gen += 1;
             self.st(|s| {
                 s.set_msg_search_loading(false);
                 s.set_search_results(model(vec![]));
-                s.set_msg_search_hint(if chars == 0 { "".into() } else { "Введите минимум 2 символа".into() });
+                s.set_msg_search_hint(if chars == 0 { "".into() } else { "Введите минимум 2 символа для поиска по сообщениям".into() });
             });
             return;
         }
@@ -78,6 +66,7 @@ impl Ui {
             .into_iter()
             .map(|(chat_id, kind, chat_name, m)| {
                 let id = chat_id.clone();
+                let message_id = m.id.to_string();
                 let date = m
                     .ts
                     .map(|t| t.format("%d.%m.%Y %H:%M").to_string())
@@ -86,6 +75,7 @@ impl Ui {
                 SearchRow {
                     chat_id: id.into(),
                     kind,
+                    message_id: message_id.into(),
                     chat_name: chat_name.into(),
                     author: m.author.into(),
                     date: date.into(),
@@ -101,9 +91,33 @@ impl Ui {
         });
     }
 
-    pub fn msg_search_openchat(&mut self, chat_id: String, kind: i32) {
-        self.st(|s| s.set_msg_search_open(false));
+    pub fn msg_search_openchat(&mut self, chat_id: String, kind: i32, message_id: String) {
+        let Some(message_id) = message_id.parse::<u64>().ok() else {
+            self.toast("Не удалось открыть найденное сообщение");
+            return;
+        };
+        self.ext.search_jump = Some((chat_id.clone(), message_id));
         self.open_chat(chat_id, kind);
+    }
+
+    pub fn check_msg_search_jump(&mut self) {
+        let Some((chat_id, message_id)) = self.ext.search_jump.clone() else { return };
+        if self.cur.as_ref().map(|c| c.id.as_str()) != Some(chat_id.as_str()) {
+            self.ext.search_jump = None;
+            return;
+        }
+        if self.cur.as_ref().is_some_and(|c| c.msgs.iter().any(|m| m.id == message_id)) {
+            self.ext.search_jump = None;
+            self.jump_to(message_id.to_string());
+            return;
+        }
+        let (has_older, loading) = self.st(|s| (s.get_has_older(), s.get_loading_older())).unwrap_or_default();
+        if has_older && !loading {
+            self.load_older();
+        } else if !has_older {
+            self.ext.search_jump = None;
+            self.toast("Найденное сообщение не входит в историю этого чата");
+        }
     }
 
     // ------------------------------------------------------------ экспорт
