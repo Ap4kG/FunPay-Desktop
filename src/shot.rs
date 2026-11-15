@@ -105,6 +105,46 @@ pub fn run(spec: &str) {
     if scene == "list" || scene == "narrowlist" {
         crate::ui::with_ui(|u| u.close_chat());
     }
+    if std::env::var("FPT_DECOR_DIR").is_ok() {
+        // рамки и баннеры с диска (FPT_DECOR_DIR = папка decor сайта), без сети
+        let dir = std::env::var("FPT_DECOR_DIR").unwrap_or_default();
+        crate::ui::with_ui(|u| {
+            for f in crate::decor::FRAMES {
+                if let Ok(b) = std::fs::read(format!("{dir}/{}", f.2)) {
+                    if let Some((buf, w, h)) = crate::imgcache::decode(&b, 256) {
+                        u.imgs.insert(crate::imgcache::key(256, &crate::decor::frame_url(f.0)), (slint::Image::from_rgba8(buf), w, h));
+                    }
+                }
+            }
+            for b in crate::decor::BANNERS {
+                if let Ok(x) = std::fs::read(format!("{dir}/{}", b.2)) {
+                    if let Some((buf, w, h)) = crate::imgcache::decode(&x, 720) {
+                        u.imgs.insert(crate::imgcache::key(720, &crate::decor::banner_url(b.0)), (slint::Image::from_rgba8(buf), w, h));
+                    }
+                }
+            }
+            crate::decor::demo_set("1", "XaviersDev", 13, 23);
+            crate::decor::demo_set("2001", "vlad_storm", 19, 4);
+            crate::decor::demo_set("2002", "darkness21", 22, 11);
+            crate::decor::demo_set("2003", "k1rill_play", 8, 0);
+            crate::decor::demo_set("2846982", "profile", 26, 10);
+            u.decor_loaded();
+            if scene == "account" {
+                {
+                    let mut c = u.cfg.lock().unwrap();
+                    c.fpt_tg = ("demo".into(), "@sdimosx".into());
+                }
+                u.ext.acc = Some(serde_json::json!({
+                    "ok": true, "pro": "temporary", "proUntil": 1798000000000i64,
+                    "plans": { "1m": { "label": "PRO на 1 месяц", "rub": 199 }, "3m": { "label": "PRO на 3 месяца", "rub": 499 }, "forever": { "label": "PRO навсегда", "rub": 1499 } },
+                    "nicks": [ { "nickname": "XaviersDev", "is_paid": false } ],
+                    "nickPrice": 399, "nickCredits": 0, "freeNick": false,
+                    "decor": { "frame": "pro", "banner": "pro" }, "decorPrices": { "frame": 149, "banner": 199 }
+                }));
+                u.acc_show();
+            }
+        });
+    }
     app.show().unwrap();
     if scene == "pluginoff" {
         app.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(520.0, 400.0) });

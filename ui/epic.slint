@@ -14,7 +14,9 @@ export component EpicNick inherits Rectangle {
     in property <bool> tag: true;
     property <bool> creator: root.tag && root.text == "sDimosX" && root.halign == TextHorizontalAlignment.left;
     property <length> tag-w: creator ? ct.preferred-width + 6px : 0px;
-    property <bool> live: nick.on && St.epic-anim && (nick.wave || nick.pulse || nick.glitch || nick.ov != 0);
+    // без анимации (в окнах со списками: иначе всё окно перерисовывается каждый кадр и скролл тормозит)
+    in property <bool> still: false;
+    property <bool> live: !still && nick.on && St.epic-anim && (nick.wave || nick.pulse || nick.glitch || nick.ov != 0);
     property <float> ms: live ? animation-tick() / 1ms : 0;
     property <float> period: max(400, nick.spd * 1000);
     property <float> f: mod(ms, period) / period;

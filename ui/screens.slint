@@ -361,6 +361,7 @@ export component SettingsView inherits Rectangle {
                                         letter: St.me-letter;
                                         c1: #8E9BFF;
                                         c2: #5B6CF0;
+                                        frame: St.me-frame;
                                     }
                                     Rectangle {
                                         width: 100px;
@@ -418,11 +419,11 @@ export component SettingsView inherits Rectangle {
                                         x: 10px;
                                         spacing: 5px;
                                         Image { source: @image-url("icons/palette.svg"); width: 13px; colorize: Theme.accent; }
-                                        Text { text: St.me-nick.on ? "Мой цветной ник" : "Сделать ник цветным"; color: Theme.accent; font-size: 11.5px; font-weight: 600; vertical-alignment: center; }
+                                        Text { text: "Украсить профиль"; color: Theme.accent; font-size: 11.5px; font-weight: 600; vertical-alignment: center; }
                                     }
                                     ena := TouchArea {
                                         mouse-cursor: pointer;
-                                        clicked => { St.epic-open = true; }
+                                        clicked => { Api.acc-show(); }
                                     }
                                 }
                             }
@@ -808,6 +809,7 @@ export component UserCard inherits Rectangle {
                     c1: St.card-c1;
                     c2: St.card-c2;
                     kind: St.cur-kind;
+                    frame: St.cur-kind == 0 ? St.card-frame : 0;
                     // аватарка открывается в просмотрщике: там сохранить и копировать
                     if St.card-has-avatar: TouchArea {
                         mouse-cursor: pointer;
@@ -1110,6 +1112,7 @@ export component ProfilePane inherits Rectangle {
                             letter: St.pf-letter;
                             c1: St.pf-c1;
                             c2: St.pf-c2;
+                            frame: St.pf-frame;
                             if St.pf-has-avatar: TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { Api.open-avatar(1); }
@@ -1126,6 +1129,7 @@ export component ProfilePane inherits Rectangle {
                         letter: St.pf-letter;
                         c1: St.pf-c1;
                         c2: St.pf-c2;
+                        frame: St.pf-frame;
                         if St.pf-has-avatar: TouchArea {
                             mouse-cursor: pointer;
                             clicked => { Api.open-avatar(1); }

@@ -35,6 +35,7 @@ export struct ChatRow {
     archived: bool,
     fpt: bool,
     check: int,         // 0 нет, 1 одна галочка, 2 две
+    frame: int,         // рамка FunPay Tools у аватарки (0 нет)
 }
 
 export struct FolderRow {
@@ -110,6 +111,7 @@ export struct MsgRow {
     has-links: bool,
     links: [LinkSpan],
     pinned: bool,
+    frame: int,         // рамка FunPay Tools у аватарки автора
 }
 
 export struct OfferRow {
@@ -389,4 +391,33 @@ export struct PackItem {
     a-label: string,
     b: string,
     on: bool,
+}
+
+// рамка для аватарки: доля аватарки от картинки и сдвиг центра кольца
+export struct Ring {
+    k: float,
+    dx: float,
+    dy: float,
+}
+
+export struct DecorBanner {
+    id: int,
+    name: string,
+    img: image,
+    has: bool,
+}
+
+// аккаунт FunPay Tools: тариф или товар в магазине
+export struct AccPlan {
+    key: string,
+    label: string,
+    price: string,
+    note: string,
+}
+
+export struct AccNick {
+    name: string,
+    note: string,
+    key: string,
+    style: NickStyle,
 }

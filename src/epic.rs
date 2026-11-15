@@ -28,7 +28,66 @@ fn set_map(mut m: HashMap<String, Nick>) {
     for (k, v) in demo().lock().unwrap().iter() {
         m.insert(k.clone(), v.clone());
     }
+    for (name, key, _) in local_fresh() {
+        if let Some(n) = decode_style(&key) {
+            m.insert(name, n);
+        }
+    }
     *map().lock().unwrap() = m;
+}
+
+/// Ключи стилей как есть (ник → FPT-STYLE-...), чтобы показать текущий стиль при смене
+fn keys() -> &'static Mutex<HashMap<String, String>> {
+    static K: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    K.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn parse_keys(body: &str) -> HashMap<String, String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return HashMap::new() };
+    v.as_object()
+        .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .unwrap_or_default()
+}
+
+/// Свой только что сохранённый стиль: виден сразу, пока общий список не обновился (держим до суток).
+fn local_path() -> std::path::PathBuf {
+    crate::config::dir().join("nick_local.json")
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn local_fresh() -> Vec<(String, String, i64)> {
+    let list: Vec<(String, String, i64)> = std::fs::read_to_string(local_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let now = now_ms();
+    list.into_iter().filter(|x| now - x.2 < 24 * 3600 * 1000).collect()
+}
+
+pub fn set_local(name: &str, key: &str) {
+    let mut list = local_fresh();
+    list.retain(|x| x.0 != name);
+    list.push((name.to_string(), key.to_string(), now_ms()));
+    let _ = std::fs::write(local_path(), serde_json::to_string(&list).unwrap_or_default());
+    keys().lock().unwrap().insert(name.to_string(), key.to_string());
+    if let Some(n) = decode_style(key) {
+        map().lock().unwrap().insert(name.to_string(), n);
+    }
+}
+
+/// Текущий ключ стиля ника (свой свежий или из общего списка).
+pub fn key(name: &str) -> String {
+    if let Some(x) = local_fresh().into_iter().find(|x| x.0 == name) {
+        return x.1;
+    }
+    keys().lock().unwrap().get(name).cloned().unwrap_or_default()
+}
+
+fn set_keys(body: &str) {
+    let k = parse_keys(body);
+    if !k.is_empty() {
+        *keys().lock().unwrap() = k;
+    }
 }
 
 fn map() -> &'static Mutex<HashMap<String, Nick>> {
@@ -95,6 +154,7 @@ pub fn load(on_ready: impl Fn() + Send + 'static) {
     if let Ok(s) = std::fs::read_to_string(cache_path()) {
         let m = parse_list(&s);
         if !m.is_empty() {
+            set_keys(&s);
             set_map(m);
             on_ready();
         }
@@ -112,6 +172,7 @@ pub fn load(on_ready: impl Fn() + Send + 'static) {
                 continue;
             }
             let _ = std::fs::write(cache_path(), &body);
+            set_keys(&body);
             set_map(m);
             on_ready();
             break;

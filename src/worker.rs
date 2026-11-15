@@ -37,6 +37,10 @@ pub enum Cmd {
     SaveDesc { text: String },
     /// После подтверждения: удалить временный лот и сохранить описание
     DescCleanup { code: String, session: Option<String>, text: String },
+    /// Аккаунт FunPay Tools: подтвердить аккаунт FunPay временным лотом
+    PromoLink { fpid: String },
+    /// После подтверждения: удалить временный лот и сообщить результат
+    PromoCleanup { offer: String, res: Result<String, String> },
     /// Аватарка собеседника для экрана заказа (из его профиля)
     OrderAvatar { uid: String, gen: u64 },
     /// Переключиться на сохранённый аккаунт
@@ -527,6 +531,8 @@ impl Worker {
             }
             Cmd::SaveDesc { text } => self.save_desc(text),
             Cmd::DescCleanup { code, session, text } => self.desc_cleanup(code, session, text),
+            Cmd::PromoLink { fpid } => self.promo_link(fpid),
+            Cmd::PromoCleanup { offer, res } => self.promo_cleanup(offer, res),
             Cmd::LoadOrder { id, gen } => {
                 let Some(fp) = self.fp.as_mut() else { return };
                 let res = fp.order(&id);
@@ -882,6 +888,71 @@ impl Worker {
                 }
             }
             post(move |u| u.send(Cmd::DescCleanup { code, session, text }));
+        });
+    }
+
+    fn promo_link(&mut self, fpid: String) {
+        let Some(fp) = self.fp.as_mut() else {
+            post(|u| u.acc_session_done(Err("Сначала войди в аккаунт FunPay.".into())));
+            return;
+        };
+        post(|u| u.acc_progress("Подтверждаю аккаунт FunPay: создаю временный лот…"));
+        let code = match crate::fptacc::link_start(&fpid) {
+            Ok(c) => c,
+            Err(e) => {
+                post(move |u| u.acc_session_done(Err(e)));
+                return;
+            }
+        };
+        if let Err(e) = fp.create_verify_lot(&code) {
+            crate::log::write(&format!("лот подтверждения FunPay Tools: {e}"));
+            self.save_cookies();
+            post(move |u| u.acc_session_done(Err(format!("Не получилось создать лот подтверждения: {e}"))));
+            return;
+        }
+        let needle = format!("FPT Verify {code}");
+        let mut offer = None;
+        for _ in 0..4 {
+            offer = fp.find_my_offer(&needle);
+            if offer.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+        }
+        self.save_cookies();
+        let Some(offer) = offer else {
+            post(|u| u.acc_session_done(Err("Лот подтверждения не нашёлся в профиле. Если лот «FPT Verify» остался, удали его на FunPay.".into())));
+            return;
+        };
+        post(|u| u.acc_progress("Жду, пока сервер увидит лот…"));
+        std::thread::spawn(move || {
+            let res = crate::fptacc::link_wait(&fpid, &offer);
+            post(move |u| u.send(Cmd::PromoCleanup { offer, res }));
+        });
+    }
+
+    fn promo_cleanup(&mut self, offer: String, res: Result<String, String>) {
+        let Some(fp) = self.fp.as_mut() else {
+            post(move |u| u.acc_session_done(res));
+            return;
+        };
+        let mut deleted = false;
+        for i in 0..3 {
+            match fp.delete_offer(&offer) {
+                Ok(()) => {
+                    deleted = true;
+                    break;
+                }
+                Err(e) => crate::log::write(&format!("удаление лота {offer}: {e}")),
+            }
+            std::thread::sleep(Duration::from_millis(1500 * (i + 1)));
+        }
+        self.save_cookies();
+        post(move |u| {
+            if !deleted {
+                u.toast("Лот «FPT Verify» не удалился сам, удали его на FunPay");
+            }
+            u.acc_session_done(res);
         });
     }
 

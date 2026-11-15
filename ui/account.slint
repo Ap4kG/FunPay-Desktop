@@ -1,0 +1,446 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { St, Api } from "globals.slint";
+import { IconButton, PrimaryButton, Avatar, LinkText } from "widgets.slint";
+import { Card } from "extras.slint";
+import { EpicNick } from "epic.slint";
+import { AccPlan, AccNick, DecorBanner, NickStyle } from "types.slint";
+
+// однострочное поле для ключа стиля: вставка, копирование и выделение работают как везде в приложении
+component KeyField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "FPT-STYLE-…";
+    height: 38px;
+    border-radius: 9px;
+    background: Theme.field;
+    border-width: ti.has-focus ? 1.5px : 0px;
+    border-color: Theme.accent;
+    FocusScope {
+        x: 11px;
+        width: parent.width - 22px;
+        height: parent.height;
+        capture-key-pressed(e) => {
+            if (e.modifiers.control && (e.text == "v" || e.text == "V" || e.text == "м" || e.text == "М")) {
+                ti.text = Api.paste-clipboard();
+                ti.set-selection-offsets(100000, 100000);
+                return accept;
+            }
+            if (e.modifiers.control && (e.text == "a" || e.text == "A" || e.text == "ф" || e.text == "Ф")) {
+                ti.select-all();
+                return accept;
+            }
+            if (e.modifiers.control && (e.text == "c" || e.text == "C" || e.text == "с" || e.text == "С")) {
+                if (ti.anchor-position-byte-offset != ti.cursor-position-byte-offset) {
+                    Api.copy-range(ti.text, ti.anchor-position-byte-offset, ti.cursor-position-byte-offset);
+                }
+                return accept;
+            }
+            return reject;
+        }
+        ti := TextInput {
+            width: parent.width;
+            height: parent.height;
+            vertical-alignment: center;
+            single-line: true;
+            font-size: 13px;
+            color: Theme.ink;
+            text <=> root.text;
+        }
+        if ti.text == "": Text {
+            text: root.placeholder;
+            color: Theme.faint;
+            font-size: 13px;
+            vertical-alignment: center;
+            height: parent.height;
+        }
+    }
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 34px;
+    min-width: lb.preferred-width + 24px;
+    border-radius: 9px;
+    background: !enabled ? Theme.field : on ? Theme.accent : ta.has-hover ? Theme.accent-soft : Theme.field;
+    lb := Text {
+        text: root.text;
+        color: root.on ? Theme.on-accent : Theme.accent;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Section inherits VerticalLayout {
+    in property <string> title;
+    in property <string> hint;
+    spacing: 8px;
+    padding-top: 6px;
+    HorizontalLayout {
+        Text { text: root.title; color: Theme.ink; font-size: 14.5px; font-weight: 650; horizontal-stretch: 1; vertical-alignment: center; }
+        if root.hint != "": Text { text: root.hint; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+    }
+    @children
+}
+
+component ProductCard inherits Rectangle {
+    in property <AccPlan> p;
+    in property <bool> on;
+    callback clicked();
+    height: col.preferred-height + 20px;
+    border-radius: 11px;
+    background: on ? Theme.accent-soft : ta.has-hover ? Theme.hover : Theme.field;
+    border-width: on ? 1.5px : 0px;
+    border-color: Theme.accent;
+    col := VerticalLayout {
+        x: 12px;
+        y: 10px;
+        width: parent.width - 24px;
+        spacing: 2px;
+        HorizontalLayout {
+            Text { text: root.p.label; color: Theme.ink; font-size: 13.5px; font-weight: 600; horizontal-stretch: 1; overflow: elide; }
+            Text { text: root.p.price; color: Theme.accent; font-size: 13.5px; font-weight: 700; }
+        }
+        if root.p.note != "": Text { text: root.p.note; color: Theme.muted; font-size: 11.5px; wrap: word-wrap; }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component NickRow inherits VerticalLayout {
+    in property <AccNick> n;
+    in property <int> idx;
+    property <bool> open;
+    property <string> key;
+    spacing: 6px;
+    HorizontalLayout {
+        spacing: 8px;
+        EpicNick { text: root.n.name; nick: root.n.style; still: true; font-size: 14px; font-weight: 650; horizontal-stretch: 1; }
+        Text { text: root.n.note; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+        LinkText {
+            text: root.open ? "Отмена" : "Сменить стиль";
+            font-size: 12.5px;
+            vertical-alignment: center;
+            clicked => {
+                if (!root.open) { root.key = root.n.key; }
+                root.open = !root.open;
+            }
+        }
+    }
+    if root.open: HorizontalLayout {
+        spacing: 8px;
+        KeyField { horizontal-stretch: 1; text <=> root.key; }
+        SmallButton {
+            text: "Сохранить";
+            enabled: !St.acc-busy;
+            clicked => { Api.acc-style(root.idx, root.key); root.open = false; }
+        }
+    }
+}
+
+// Аккаунт FunPay Tools: вход через бота, PRO, цветные ники, рамка и баннер. Всё как во вкладке «Аккаунт» расширения.
+export component AccountDialog inherits Card {
+    w: 520px;
+    close => { St.acc-open = false; }
+    property <length> cw: min(520px, St.win-w - 24px) - 40px;
+    property <string> add-key;
+    property <int> per-row: max(4, floor((root.cw + 6px) / 62px));
+    Rectangle {
+        height: 48px;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 8px;
+            Text { text: "Аккаунт FunPay Tools"; color: Theme.ink; font-size: 17px; font-weight: 650; vertical-alignment: center; horizontal-stretch: 1; }
+            VerticalLayout {
+                alignment: center;
+                IconButton { icon: @image-url("icons/close.svg"); clicked => { St.acc-open = false; } }
+            }
+        }
+    }
+    ScrollView {
+        content-width: self.visible-width;
+        preferred-height: inner.preferred-height;
+        inner := VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-bottom: 20px;
+            spacing: 12px;
+
+            // ── вход ──
+            if !St.acc-tg: VerticalLayout {
+                spacing: 10px;
+                Text {
+                    text: "PRO, цветной ник, рамка для аватарки и баннер профиля прямо здесь. Войди через нашего Telegram-бота один раз: ключ PRO и чеки тоже придут в бота.";
+                    color: Theme.muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    width: root.cw;
+                }
+                PrimaryButton {
+                    text: "Войти через Telegram";
+                    busy: St.acc-busy;
+                    clicked => { Api.acc-tg-login(); }
+                }
+            }
+
+            if St.acc-tg: HorizontalLayout {
+                spacing: 10px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text { text: "Telegram"; color: Theme.ink; font-size: 14px; font-weight: 650; }
+                    Text { text: St.acc-tg-name; color: Theme.muted; font-size: 12.5px; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    LinkText { text: "Выйти"; font-size: 13px; clicked => { Api.acc-tg-logout(); } }
+                }
+            }
+
+            if St.acc-msg != "": Text {
+                text: St.acc-msg;
+                color: St.acc-msg-err ? Theme.danger : Theme.accent;
+                font-size: 13px;
+                wrap: word-wrap;
+                width: root.cw;
+            }
+
+            if St.acc-tg && St.acc-loading: Text { text: "Загружаю профиль…"; color: Theme.muted; font-size: 13px; }
+
+            if St.acc-tg && !St.acc-loading && St.acc-pro == "": HorizontalLayout {
+                spacing: 10px;
+                Text { text: "Профиль не загрузился."; color: Theme.muted; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                SmallButton { text: "Повторить"; clicked => { Api.acc-reload(); } }
+            }
+
+            if St.acc-tg && !St.acc-loading && St.acc-pro != "": VerticalLayout {
+                spacing: 12px;
+                // статус
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 56px;
+                        border-radius: 11px;
+                        background: Theme.field;
+                        VerticalLayout {
+                            padding: 10px;
+                            Text { text: "PRO"; color: Theme.muted; font-size: 11.5px; }
+                            Text { text: St.acc-pro; color: Theme.ink; font-size: 14.5px; font-weight: 650; }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 56px;
+                        border-radius: 11px;
+                        background: Theme.field;
+                        VerticalLayout {
+                            padding: 10px;
+                            Text { text: "Цветные ники"; color: Theme.muted; font-size: 11.5px; }
+                            Text { text: St.acc-nick-count; color: Theme.ink; font-size: 14.5px; font-weight: 650; }
+                        }
+                    }
+                }
+
+                // магазин
+                Section {
+                    title: "Купить";
+                    for p in St.acc-plans: ProductCard {
+                        p: p;
+                        on: St.acc-pay-product == p.key;
+                        clicked => { Api.acc-buy(p.key); }
+                    }
+                }
+
+                // оплата
+                if St.acc-pay-step > 0: Rectangle {
+                    border-radius: 11px;
+                    background: Theme.field;
+                    height: pay.preferred-height + 24px;
+                    pay := VerticalLayout {
+                        x: 12px;
+                        y: 12px;
+                        width: parent.width - 24px;
+                        spacing: 8px;
+                        Text { text: St.acc-pay-title; color: Theme.ink; font-size: 13.5px; font-weight: 650; wrap: word-wrap; }
+                        if St.acc-pay-step == 1: HorizontalLayout {
+                            spacing: 8px;
+                            SmallButton { text: "СБП"; enabled: !St.acc-busy; clicked => { Api.acc-pay("sbp"); } }
+                            SmallButton { text: "Карта"; enabled: !St.acc-busy; clicked => { Api.acc-pay("card"); } }
+                            SmallButton { text: "Крипта"; enabled: !St.acc-busy; clicked => { Api.acc-pay("crypto"); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if St.acc-pay-step == 2: HorizontalLayout {
+                            spacing: 8px;
+                            SmallButton { text: "Я оплатил"; clicked => { Api.acc-pay-check(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if St.acc-pay-state != "": Text { text: St.acc-pay-state; color: Theme.muted; font-size: 12.5px; wrap: word-wrap; }
+                    }
+                }
+
+                // добавить свой ник
+                if St.acc-can-add: Section {
+                    title: St.acc-add-title;
+                    Text { text: St.acc-add-note; color: Theme.muted; font-size: 12.5px; wrap: word-wrap; width: root.cw; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        KeyField { horizontal-stretch: 1; text <=> root.add-key; }
+                        SmallButton { text: "Добавить"; enabled: !St.acc-busy; clicked => { Api.acc-add-nick(root.add-key); } }
+                    }
+                }
+
+                // мои ники
+                if St.acc-nicks.length > 0: Section {
+                    title: "Мои цветные ники";
+                    hint: "стиль собирается в генераторе на сайте";
+                    for n[i] in St.acc-nicks: NickRow { n: n; idx: i; }
+                }
+                HorizontalLayout {
+                    LinkText { text: "Открыть генератор стилей"; font-size: 13px; clicked => { Api.open-external("https://funpay.tools/donate"); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                // украшения
+                Section {
+                    title: "Рамка и баннер профиля";
+                    Text {
+                        text: "Рамка вокруг аватарки и баннер в профиле. Их видят все, у кого стоит FunPay Tools: в приложении, расширении и на FunPay.";
+                        color: Theme.muted;
+                        font-size: 12.5px;
+                        wrap: word-wrap;
+                        width: root.cw;
+                    }
+                    // превью
+                    Rectangle {
+                        height: 96px;
+                        border-radius: 12px;
+                        clip: true;
+                        background: Theme.field;
+                        if St.acc-db > 0 && St.acc-db <= St.decor-banners.length && St.decor-banners[St.acc-db - 1].has: Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: St.decor-banners[St.acc-db - 1].img;
+                            image-fit: cover;
+                            opacity: 0.9;
+                        }
+                        Avatar {
+                            x: 22px;
+                            y: (parent.height - self.height) / 2;
+                            size: 58px;
+                            img: St.me-avatar;
+                            has-img: St.me-has-avatar;
+                            letter: St.me-letter;
+                            c1: #8E9BFF;
+                            c2: #5B6CF0;
+                            frame: St.acc-df;
+                        }
+                        EpicNick {
+                            x: 104px;
+                            y: (parent.height - self.height) / 2;
+                            text: St.me-name;
+                            nick: St.me-nick;
+                            still: true;
+                            font-size: 16px;
+                            font-weight: 650;
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Рамка"; color: Theme.ink; font-size: 13px; font-weight: 600; horizontal-stretch: 1; }
+                        Text { text: St.acc-r-frame; color: Theme.muted; font-size: 12px; }
+                    }
+                    // сетка рамок: 0 = без рамки
+                    Rectangle {
+                        height: ceil((St.decor-frames.length + 1) / root.per-row) * 62px;
+                        for i in St.decor-frames.length + 1: Rectangle {
+                            property <int> fid: i;
+                            x: mod(i, root.per-row) * 62px;
+                            y: floor(i / root.per-row) * 62px;
+                            width: 56px;
+                            height: 56px;
+                            border-radius: 10px;
+                            background: St.acc-df == self.fid ? Theme.accent-soft : fta.has-hover ? Theme.hover : Theme.field;
+                            border-width: St.acc-df == self.fid ? 1.5px : 0px;
+                            border-color: Theme.accent;
+                            if self.fid == 0: Text { text: "Нет"; color: Theme.muted; font-size: 12px; }
+                            if self.fid > 0 && St.decor-has[self.fid - 1]: Image {
+                                width: 48px;
+                                height: 48px;
+                                source: St.decor-frames[parent.fid - 1];
+                                image-fit: contain;
+                            }
+                            fta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { Api.acc-pick(0, parent.fid); }
+                            }
+                        }
+                    }
+                    if !St.acc-has-frame: ProductCard {
+                        p: { key: "frame", label: "Рамка навсегда", price: St.acc-price-frame, note: "любая из 30, менять сколько угодно. Или возьми PRO: там всё сразу" };
+                        on: St.acc-pay-product == "frame";
+                        clicked => { Api.acc-buy("frame"); }
+                    }
+                    HorizontalLayout {
+                        padding-top: 4px;
+                        Text { text: "Баннер"; color: Theme.ink; font-size: 13px; font-weight: 600; horizontal-stretch: 1; }
+                        Text { text: St.acc-r-banner; color: Theme.muted; font-size: 12px; }
+                    }
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 9px;
+                        background: St.acc-db == 0 ? Theme.accent-soft : nba.has-hover ? Theme.hover : Theme.field;
+                        border-width: St.acc-db == 0 ? 1.5px : 0px;
+                        border-color: Theme.accent;
+                        Text { text: "Без баннера"; color: Theme.muted; font-size: 12.5px; }
+                        nba := TouchArea { mouse-cursor: pointer; clicked => { Api.acc-pick(1, 0); } }
+                    }
+                    for b in St.decor-banners: Rectangle {
+                        height: 40px;
+                        border-radius: 9px;
+                        clip: true;
+                        background: Theme.field;
+                        border-width: St.acc-db == b.id ? 2px : 0px;
+                        border-color: Theme.accent;
+                        if b.has: Image { width: parent.width; height: parent.height; source: b.img; image-fit: cover; }
+                        Rectangle {
+                            x: 8px;
+                            y: (parent.height - self.height) / 2;
+                            width: bn.preferred-width + 12px;
+                            height: 20px;
+                            border-radius: 6px;
+                            background: #00000088;
+                            bn := Text { text: b.name; color: white; font-size: 11.5px; }
+                        }
+                        TouchArea { mouse-cursor: pointer; clicked => { Api.acc-pick(1, b.id); } }
+                    }
+                    if !St.acc-has-banner: ProductCard {
+                        p: { key: "banner", label: "Баннер навсегда", price: St.acc-price-banner, note: "любой из 27, менять сколько угодно. Или возьми PRO" };
+                        on: St.acc-pay-product == "banner";
+                        clicked => { Api.acc-buy("banner"); }
+                    }
+                    PrimaryButton {
+                        text: "Сохранить украшения";
+                        busy: St.acc-busy;
+                        clicked => { Api.acc-decor-save(); }
+                    }
+                    if St.acc-decor-msg != "": Text {
+                        text: St.acc-decor-msg;
+                        color: St.acc-decor-err ? Theme.danger : Theme.accent;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                        width: root.cw;
+                    }
+                }
+            }
+        }
+    }
+}
+

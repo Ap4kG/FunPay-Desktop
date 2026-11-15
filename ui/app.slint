@@ -10,6 +10,7 @@ import { ChatPane, EmptyChat } from "chatview.slint";
 import { LoginView, SettingsView, ImageViewer, UserCard, ProfilePane, OrderPane, BrowserBar, SendBox, DescDialog } from "screens.slint";
 import { TemplatesDialog } from "templates.slint";
 import { EpicDialog, NotesDialog } from "extras.slint";
+import { AccountDialog } from "account.slint";
 import { NotifyWindow } from "notify.slint";
 import { WidgetWindow } from "widget.slint";
 import { ProxyDialog, WidgetsDialog, DiscordDialog } from "desk.slint";
@@ -73,7 +74,7 @@ export component AppWindow inherits Window {
     out property <length> browser-y: St.browser-login ? top + 44px : top + mini-y + 44px;
     out property <length> browser-w: St.browser-login ? root.width : mini-w;
     out property <length> browser-h: St.browser-login ? root.height - top - 44px : mini-h - 44px;
-    out property <bool> overlay-open: St.settings-open || St.card-open || St.viewer-open || St.sendbox-open || St.folder-dialog-open || St.od-dialog != 0 || St.desc-open || St.tpl-open || St.epic-open || St.notes-open || St.lot-open || St.themes-open || St.plugins-open || St.plugin-id != "" || St.cat-open || St.plugin-ask != "" || St.proxy-open || St.widgets-open || St.rpc-open || St.stats-open || St.txn-open || St.sched-open || St.dnd-open;
+    out property <bool> overlay-open: St.settings-open || St.card-open || St.viewer-open || St.sendbox-open || St.folder-dialog-open || St.od-dialog != 0 || St.desc-open || St.tpl-open || St.epic-open || St.acc-open || St.notes-open || St.lot-open || St.themes-open || St.plugins-open || St.plugin-id != "" || St.cat-open || St.plugin-ask != "" || St.proxy-open || St.widgets-open || St.rpc-open || St.stats-open || St.txn-open || St.sched-open || St.dnd-open;
 
     property <length> wh: root.height;
     changed wh => { St.win-h = self.wh; }
@@ -134,6 +135,8 @@ export component AppWindow inherits Window {
                     St.tpl-open = false;
                     St.tpl-editing = false;
                     St.auto-editing = false;
+                } else if (St.acc-open) {
+                    St.acc-open = false;
                 } else if (St.epic-open) {
                     St.epic-open = false;
                 } else if (St.notes-open) {
@@ -263,6 +266,7 @@ export component AppWindow inherits Window {
         if St.themes-open: ThemesDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
         if St.tpl-open: TemplatesDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
         if St.epic-open: EpicDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
+        if St.acc-open: AccountDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
         if St.notes-open: NotesDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
         if St.plugins-open && St.logged-in: PluginsDrawer { y: root.top; width: parent.width; height: parent.height - root.top; }
         if St.plugin-id != "": PluginDialog { y: root.top; width: parent.width; height: parent.height - root.top; }
